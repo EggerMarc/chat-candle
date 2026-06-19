@@ -14,7 +14,8 @@
 //! candle analogue of chat-mlx's `MaybeQuantized<Linear>`. Only construction
 //! differs between the two; `forward` is identical.
 
-use std::fs::File;
+use std::io::{Read, Seek};
+#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use candle_core::quantized::{QMatMul, QTensor, gguf_file};
@@ -170,7 +171,12 @@ impl Attention {
         })
     }
 
-    fn new_gguf(args: &ModelArgs, rotary: Rotary, gg: &mut Gguf, i: usize) -> Result<Self> {
+    fn new_gguf<R: Read + Seek>(
+        args: &ModelArgs,
+        rotary: Rotary,
+        gg: &mut Gguf<R>,
+        i: usize,
+    ) -> Result<Self> {
         let p = format!("blk.{i}");
         let eps = args.norm_eps as f64;
         let (q_norm, k_norm) = if args.use_qk_norm {
@@ -259,7 +265,7 @@ impl Mlp {
         })
     }
 
-    fn new_gguf(gg: &mut Gguf, i: usize) -> Result<Self> {
+    fn new_gguf<R: Read + Seek>(gg: &mut Gguf<R>, i: usize) -> Result<Self> {
         let p = format!("blk.{i}");
         Ok(Self {
             gate_proj: QLinear::Quant(gg.qmatmul(&format!("{p}.ffn_gate.weight"))?),
@@ -293,7 +299,12 @@ impl DecoderLayer {
         })
     }
 
-    fn new_gguf(args: &ModelArgs, rotary: Rotary, gg: &mut Gguf, i: usize) -> Result<Self> {
+    fn new_gguf<R: Read + Seek>(
+        args: &ModelArgs,
+        rotary: Rotary,
+        gg: &mut Gguf<R>,
+        i: usize,
+    ) -> Result<Self> {
         let eps = args.norm_eps as f64;
         let p = format!("blk.{i}");
         Ok(Self {
@@ -368,8 +379,11 @@ impl Model {
     /// `general.architecture` (`llama.*` / `qwen2.*` / `qwen3.*` / `mistral.*`
     /// …), and the tensor names are llama.cpp's shared scheme — so the same
     /// path loads any Llama/Qwen/Mistral-family GGUF, not just Qwen3.
-    pub fn from_gguf(path: &Path, device: &Device) -> Result<(Self, ModelArgs, String)> {
-        let mut gg = Gguf::open(path, device)?;
+    pub fn from_gguf_reader<R: Read + Seek>(
+        reader: R,
+        device: &Device,
+    ) -> Result<(Self, ModelArgs, String)> {
+        let mut gg = Gguf::from_reader(reader, device)?;
         let dtype = DType::F32;
 
         let arch = gg.arch()?;
@@ -437,6 +451,12 @@ impl Model {
         ))
     }
 
+    /// Native convenience: build from a GGUF file path.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn from_gguf(path: &Path, device: &Device) -> Result<(Self, ModelArgs, String)> {
+        Self::from_gguf_reader(std::fs::File::open(path)?, device)
+    }
+
     pub fn device(&self) -> &Device {
         &self.device
     }
@@ -484,26 +504,26 @@ fn causal_mask(seq: usize, offset: usize, dtype: DType, dev: &Device) -> Result<
     Tensor::from_vec(data, (seq, klen), dev)?.to_dtype(dtype)
 }
 
-/// Reader over a GGUF file: pulls quantized tensors and metadata by name.
-struct Gguf {
+/// Reader over a GGUF source (a file on native, in-memory bytes on wasm):
+/// pulls quantized tensors and metadata by name.
+struct Gguf<R: Read + Seek> {
     content: gguf_file::Content,
-    file: File,
+    reader: R,
     device: Device,
 }
 
-impl Gguf {
-    fn open(path: &Path, device: &Device) -> Result<Self> {
-        let mut file = File::open(path)?;
-        let content = gguf_file::Content::read(&mut file)?;
+impl<R: Read + Seek> Gguf<R> {
+    fn from_reader(mut reader: R, device: &Device) -> Result<Self> {
+        let content = gguf_file::Content::read(&mut reader)?;
         Ok(Self {
             content,
-            file,
+            reader,
             device: device.clone(),
         })
     }
 
     fn read_qtensor(&mut self, name: &str) -> Result<QTensor> {
-        self.content.tensor(&mut self.file, name, &self.device)
+        self.content.tensor(&mut self.reader, name, &self.device)
     }
 
     fn qmatmul(&mut self, name: &str) -> Result<QMatMul> {

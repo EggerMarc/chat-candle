@@ -9,10 +9,25 @@
 //! The n-gram / prompt-lookup speculative path (`generate_ngram`) is not yet
 //! ported — it needs cache truncation + multi-token verification; a follow-up.
 
-use std::time::Instant;
-
 use anyhow::Result;
 use candle_core::{IndexOp, Tensor};
+
+// `std::time::Instant` panics on wasm32-unknown-unknown (no clock). Time on
+// native; report 0.0 in the browser (the JS side can measure wall-clock).
+#[cfg(not(target_arch = "wasm32"))]
+fn now() -> std::time::Instant {
+    std::time::Instant::now()
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn secs(t: std::time::Instant) -> f64 {
+    t.elapsed().as_secs_f64()
+}
+#[cfg(target_arch = "wasm32")]
+fn now() {}
+#[cfg(target_arch = "wasm32")]
+fn secs(_: ()) -> f64 {
+    0.0
+}
 
 use super::cache::KvCache;
 use super::constraint::LogitMask;
@@ -39,14 +54,14 @@ pub fn generate<F: FnMut(u32) -> bool>(
     let dev = model.device();
     let mut lp = opts.processor(0);
 
-    let t_prefill = Instant::now();
+    let t_prefill = now();
     let input = Tensor::new(prompt_ids, dev)?.unsqueeze(0)?;
     let logits = model.forward(&input, cache)?;
     let last = logits.i((0, logits.dim(1)? - 1))?;
     let mut next = lp.sample(&last)?;
-    let prefill_secs = t_prefill.elapsed().as_secs_f64();
+    let prefill_secs = secs(t_prefill);
 
-    let t_decode = Instant::now();
+    let t_decode = now();
     let mut out = Vec::with_capacity(max_tokens);
     loop {
         if eos.contains(&next) {
@@ -61,7 +76,7 @@ pub fn generate<F: FnMut(u32) -> bool>(
         let last = logits.i((0, 0))?;
         next = lp.sample(&last)?;
     }
-    let decode_secs = t_decode.elapsed().as_secs_f64();
+    let decode_secs = secs(t_decode);
 
     Ok(GenStats {
         tokens: out,
@@ -84,14 +99,14 @@ pub fn generate_constrained<F: FnMut(u32) -> bool>(
     let dev = model.device();
     let mut lp = opts.processor(0);
 
-    let t_prefill = Instant::now();
+    let t_prefill = now();
     let input = Tensor::new(prompt_ids, dev)?.unsqueeze(0)?;
     let logits = model.forward(&input, cache)?;
     let last = constraint.mask(&logits.i((0, logits.dim(1)? - 1))?)?;
     let mut next = lp.sample(&last)?;
-    let prefill_secs = t_prefill.elapsed().as_secs_f64();
+    let prefill_secs = secs(t_prefill);
 
-    let t_decode = Instant::now();
+    let t_decode = now();
     let mut out = Vec::with_capacity(max_tokens);
     loop {
         if eos.contains(&next) {
@@ -107,7 +122,7 @@ pub fn generate_constrained<F: FnMut(u32) -> bool>(
         let last = constraint.mask(&logits.i((0, 0))?)?;
         next = lp.sample(&last)?;
     }
-    let decode_secs = t_decode.elapsed().as_secs_f64();
+    let decode_secs = secs(t_decode);
 
     Ok(GenStats {
         tokens: out,

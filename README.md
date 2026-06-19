@@ -28,6 +28,29 @@ cargo run --release --features accelerate # CPU + Apple Accelerate BLAS
 
 Compute dtype follows the device: bf16 on CUDA, f16 on Metal, f32 on CPU.
 
+## Browser (wasm)
+
+The engine also compiles to `wasm32` and exposes a `wasm-bindgen` API. The
+native provider stack (chat-rs, tokio, hf-hub) is feature-gated off; weights and
+tokenizer arrive as byte arrays from JS (no filesystem in the browser), and
+inference runs on candle's **CPU** backend (candle 0.10.2 has no wasm WebGPU
+backend yet — so it's correct but slow; WebGPU is the next milestone).
+
+```bash
+wasm-pack build --target web --out-dir web/pkg -- --no-default-features
+#   then serve web/ over http and open index.html
+python3 -m http.server -d web 8080
+```
+
+The page lets you pick a GGUF + `tokenizer.json` locally and generate. JS API:
+
+```js
+import init, { LocalChat } from "./pkg/chat_candle.js";
+await init();
+const chat = new LocalChat(ggufBytes, tokenizerBytes);   // Uint8Array each
+chat.generate("Hello", undefined, 64, 0.0, (piece) => print(piece));
+```
+
 ## Layout
 
 ```
@@ -128,7 +151,10 @@ Q8_0 GGUF **34.3 tok/s**; Q4_K_M GGUF **38.4 tok/s**.
       from GGUF metadata (`general.architecture` namespace), so any
       Llama/Qwen/Mistral-family GGUF loads, not just Qwen3.
 - [x] q4_K / q8_0 GGUF verified on Metal (Q4_K_M, Q8_0)
+- [x] **wasm32 build** — `wasm-bindgen` `LocalChat` API, GGUF from bytes, CPU
+      backend (see [Browser](#browser-wasm)); compiles via `wasm-pack`
 - [ ] **rotating attention-sink KV cache** — today grows by concat (unbounded);
       port chat-mlx's bounded window.
 - [ ] n-gram / prompt-lookup speculative decoding (`generate_ngram`)
-- [ ] wasm32 + WebGPU target (candle compiles to wasm — the original motivation)
+- [ ] **wasm + WebGPU** — candle 0.10.2 wasm is CPU-only; a WebGPU backend is
+      what makes browser inference actually fast (the original motivation)
