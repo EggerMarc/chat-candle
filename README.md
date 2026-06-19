@@ -42,7 +42,9 @@ wasm-pack build --target web --out-dir web/pkg -- --no-default-features
 python3 -m http.server -d web 8080
 ```
 
-The page lets you pick a GGUF + `tokenizer.json` locally and generate. JS API:
+A full **Vite + React** example (auto-downloads weights, runs in a Web Worker,
+streaming chat UI) lives in [`examples/web`](examples/web). The minimal vanilla
+harness below lets you pick a GGUF + `tokenizer.json` locally instead. JS API:
 
 ```js
 import init, { LocalChat } from "./pkg/chat_candle.js";
