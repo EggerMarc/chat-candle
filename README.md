@@ -116,8 +116,8 @@ per-family source files:
 
 ## Status
 
-Throughput, Qwen3-0.6B, M-series, 48-token decode: fp16 Metal **20.8 tok/s**;
-Q8_0 GGUF Metal **34.3 tok/s**.
+Throughput, Qwen3-0.6B, M-series, 48-token decode (Metal): fp16 **20.8 tok/s**;
+Q8_0 GGUF **34.3 tok/s**; Q4_K_M GGUF **38.4 tok/s**.
 
 - [x] bf16/f16 generate (Qwen3-0.6B), coherent output on CPU / Metal
 - [x] config-driven QKV bias + QK-norm + tied embeddings (auto-detected)
@@ -127,8 +127,8 @@ Q8_0 GGUF Metal **34.3 tok/s**.
       `Linear` | `QMatMul`). Architecture-agnostic: hyperparameters + arch read
       from GGUF metadata (`general.architecture` namespace), so any
       Llama/Qwen/Mistral-family GGUF loads, not just Qwen3.
+- [x] q4_K / q8_0 GGUF verified on Metal (Q4_K_M, Q8_0)
 - [ ] **rotating attention-sink KV cache** — today grows by concat (unbounded);
       port chat-mlx's bounded window.
-- [ ] q4 GGUF on Metal (Q8_0 verified; verify q4_k kernel coverage per device)
 - [ ] n-gram / prompt-lookup speculative decoding (`generate_ngram`)
 - [ ] wasm32 + WebGPU target (candle compiles to wasm — the original motivation)
