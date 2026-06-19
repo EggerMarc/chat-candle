@@ -46,18 +46,30 @@ struct Cli {
     #[clap(long, default_value = "4")]
     sink_tokens: i32,
 
-    /// Load pre-quantized weights (not yet supported on the candle backend).
+    /// GGUF repo for quantized weights (e.g. `Qwen/Qwen3-0.6B-GGUF`). The
+    /// tokenizer is taken from `--model`.
     #[clap(long)]
-    quantize: bool,
+    gguf: Option<String>,
+
+    /// GGUF filename within `--gguf` (e.g. `Qwen3-0.6B-Q4_K_M.gguf`).
+    #[clap(long)]
+    gguf_file: Option<String>,
 }
 
 fn main() -> Result<()> {
     let cli = Cli::parse();
 
-    let quant = cli.quantize.then_some(loader::Quantize::Q4);
-
-    eprintln!("[info] loading {} …", cli.model);
-    let loaded = loader::load(&cli.model, quant)?;
+    let loaded = match (&cli.gguf, &cli.gguf_file) {
+        (Some(repo), Some(file)) => {
+            eprintln!("[info] loading quantized {file} from {repo} …");
+            loader::load_gguf(repo, file, &cli.model)?
+        }
+        (None, None) => {
+            eprintln!("[info] loading {} …", cli.model);
+            loader::load(&cli.model, None)?
+        }
+        _ => anyhow::bail!("--gguf and --gguf-file must be provided together"),
+    };
     let args = &loaded.args;
     eprintln!(
         "[info] model: dim={} layers={} heads={}/{} head_dim={} vocab={} | device={:?}",

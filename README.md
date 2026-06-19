@@ -77,10 +77,21 @@ Builder knobs: `with_max_context`, `with_sink_tokens`, `with_tokens_per_eval`,
 cargo run --release --features metal -- --model Qwen/Qwen3-0.6B \
   --prompt "Explain RoPE in one sentence." --temp 0.7 --top-k 40
 # flags: --model --system --prompt --max-tokens --temp --top-k --top-p
-#        --max-context --sink-tokens
+#        --max-context --sink-tokens --gguf --gguf-file
 ```
 
 Default model: `Qwen/Qwen3-0.6B` (bf16/f16 safetensors).
+
+Quantized (GGUF) — weights from `--gguf`, tokenizer/template from `--model`:
+
+```bash
+cargo run --release --features metal -- --model Qwen/Qwen3-0.6B \
+  --gguf Qwen/Qwen3-0.6B-GGUF --gguf-file Qwen3-0.6B-Q8_0.gguf \
+  --prompt "Explain RoPE in one sentence."
+```
+
+As a provider: `CandleBuilder::new().with_gguf("Qwen/Qwen3-0.6B-GGUF",
+"Qwen3-0.6B-Q8_0.gguf").with_model("Qwen/Qwen3-0.6B").build()?`.
 
 ## Supported model families
 
@@ -105,15 +116,19 @@ per-family source files:
 
 ## Status
 
+Throughput, Qwen3-0.6B, M-series, 48-token decode: fp16 Metal **20.8 tok/s**;
+Q8_0 GGUF Metal **34.3 tok/s**.
+
 - [x] bf16/f16 generate (Qwen3-0.6B), coherent output on CPU / Metal
 - [x] config-driven QKV bias + QK-norm + tied embeddings (auto-detected)
 - [x] **chat-rs provider**: completion, streaming, tool families, structured output
 - [x] constrained (valid-JSON) decoding via logit masking
-- [ ] **quantization** — load pre-quantized GGUF via `candle_core::quantized` (the
-      q4 GEMV lever; ~3× decode). Today loads fp weights; `--quantize` warns.
+- [x] **quantization** — pre-quantized GGUF via `QMatMul` (`QLinear` enum: dense
+      `Linear` | `QMatMul`). Architecture-agnostic: hyperparameters + arch read
+      from GGUF metadata (`general.architecture` namespace), so any
+      Llama/Qwen/Mistral-family GGUF loads, not just Qwen3.
 - [ ] **rotating attention-sink KV cache** — today grows by concat (unbounded);
       port chat-mlx's bounded window.
+- [ ] q4 GGUF on Metal (Q8_0 verified; verify q4_k kernel coverage per device)
 - [ ] n-gram / prompt-lookup speculative decoding (`generate_ngram`)
-- [ ] CUDA load matrix; a fused kernel experiment
 - [ ] wasm32 + WebGPU target (candle compiles to wasm — the original motivation)
-```

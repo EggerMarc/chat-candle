@@ -118,6 +118,51 @@ pub fn load(model_id: &str, quant: Option<Quantize>) -> Result<Loaded> {
     })
 }
 
+/// Load a quantized model from a GGUF file. `gguf_repo`/`gguf_file` locate the
+/// quantized weights; `tokenizer_repo` is the base fp repo we pull
+/// `tokenizer.json` + chat template from (GGUF carries weights + metadata, but
+/// we reuse the HF tokenizer). Hyperparameters and the architecture come from
+/// the GGUF metadata, so this is not Qwen-specific.
+pub fn load_gguf(gguf_repo: &str, gguf_file: &str, tokenizer_repo: &str) -> Result<Loaded> {
+    let api = Api::new()?;
+
+    let grepo = api.repo(Repo::new(gguf_repo.to_string(), RepoType::Model));
+    let gguf_path = grepo
+        .get(gguf_file)
+        .with_context(|| format!("fetch {gguf_file} from {gguf_repo}"))?;
+
+    let trepo = api.repo(Repo::new(tokenizer_repo.to_string(), RepoType::Model));
+    let tokenizer_path = trepo.get("tokenizer.json").context("fetch tokenizer.json")?;
+    let tokenizer = Tokenizer::from_file(tokenizer_path).map_err(|e| anyhow::anyhow!(e))?;
+    let (chat_template, eos_token) = read_chat_config(&trepo);
+
+    let device = model::default_device()?;
+    let (m, args, arch) = Model::from_gguf(&gguf_path, &device)
+        .map_err(|e| anyhow::anyhow!("load gguf {gguf_file}: {e}"))?;
+
+    let mut eos = Vec::new();
+    for t in ["<|im_end|>", "<|endoftext|>"] {
+        if let Some(id) = tokenizer.token_to_id(t) {
+            eos.push(id);
+        }
+    }
+    if eos.is_empty()
+        && !eos_token.is_empty()
+        && let Some(id) = tokenizer.token_to_id(&eos_token)
+    {
+        eos.push(id);
+    }
+
+    Ok(Loaded {
+        model: m,
+        tokenizer,
+        args,
+        eos,
+        model_type: arch,
+        chat_template,
+    })
+}
+
 struct Arch {
     use_qk_norm: bool,
     attn_qkv_bias: bool,

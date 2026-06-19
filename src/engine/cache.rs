@@ -33,13 +33,10 @@ impl KvCache {
         }
     }
 
-    /// Number of tokens already cached (the RoPE / mask position offset).
-    /// Read *before* `update_and_fetch` folds in the current step.
     pub fn offset(&self) -> usize {
         self.offset
     }
 
-    /// Drop everything past `len` tokens (used by speculative decoding).
     #[allow(dead_code)]
     pub fn truncate(&mut self, len: usize) -> Result<()> {
         let len = len.min(self.offset);
@@ -51,8 +48,6 @@ impl KvCache {
         Ok(())
     }
 
-    /// Append `k`/`v` (shape `(batch, kv_heads, seq, head_dim)`) and return the
-    /// full cached keys/values to attend over.
     pub fn update_and_fetch(&mut self, k: &Tensor, v: &Tensor) -> Result<(Tensor, Tensor)> {
         let keys = match &self.keys {
             Some(prev) => Tensor::cat(&[prev, k], 2)?,

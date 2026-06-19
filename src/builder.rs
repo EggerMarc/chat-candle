@@ -14,6 +14,7 @@ pub struct WithModel;
 pub struct CandleBuilder<M = WithoutModel> {
     model_id: Option<String>,
     quant: Option<Quantize>,
+    gguf: Option<(String, String)>,
     tokens_per_eval: usize,
     max_context: Option<i32>,
     sink_tokens: i32,
@@ -34,6 +35,7 @@ impl CandleBuilder<WithoutModel> {
         Self {
             model_id: None,
             quant: None,
+            gguf: None,
             tokens_per_eval: 8,
             max_context: Some(4096),
             sink_tokens: 4,
@@ -48,6 +50,7 @@ impl CandleBuilder<WithoutModel> {
         CandleBuilder {
             model_id: Some(id.into()),
             quant: self.quant,
+            gguf: self.gguf,
             tokens_per_eval: self.tokens_per_eval,
             max_context: self.max_context,
             sink_tokens: self.sink_tokens,
@@ -62,6 +65,14 @@ impl CandleBuilder<WithoutModel> {
 impl<M> CandleBuilder<M> {
     pub fn with_quantize(mut self, quant: Quantize) -> Self {
         self.quant = Some(quant);
+        self
+    }
+
+    /// Load quantized weights from a GGUF file instead of fp safetensors. The
+    /// tokenizer/chat-template are still taken from the `with_model` repo. The
+    /// architecture is read from GGUF metadata, so this is not model-specific.
+    pub fn with_gguf(mut self, repo: impl Into<String>, file: impl Into<String>) -> Self {
+        self.gguf = Some((repo.into(), file.into()));
         self
     }
 
@@ -108,7 +119,11 @@ impl CandleBuilder<WithModel> {
     pub fn build(self) -> Result<CandleClient, ChatFailure> {
         let model_id = self.model_id.expect("with_model() sets model_id");
 
-        let loaded = loader::load(&model_id, self.quant).map_err(|e| {
+        let loaded = match &self.gguf {
+            Some((repo, file)) => loader::load_gguf(repo, file, &model_id),
+            None => loader::load(&model_id, self.quant),
+        }
+        .map_err(|e| {
             ChatFailure::from_err(ChatError::Provider(format!(
                 "chat-candle failed to load {model_id}: {e}"
             )))
