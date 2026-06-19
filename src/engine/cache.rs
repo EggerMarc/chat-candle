@@ -2,13 +2,17 @@
 //!
 //! candle tensors are immutable, so where chat-mlx wrote new tokens into a
 //! pre-allocated buffer with `index_mut`, we grow by concatenating along the
-//! sequence axis — the candle-idiomatic form, and what candle's own decoders
-//! do. The external surface (`offset`, `update_and_fetch`, `truncate`) matches
-//! the mlx version so `model.rs`/`generate.rs` are unchanged.
+//! sequence axis. This is also the candle-idiomatic form. The external surface
+//! (`offset`, `update_and_fetch`, `truncate`) matches the mlx version so
+//! `model.rs`/`generate.rs` are unchanged.
 //!
-//! TODO: port chat-mlx's rotating attention-sink window (bounded memory). For
-//! now `max_size`/`keep` are accepted and retained but the cache grows
-//! unbounded; a long-generation memory cap is a follow-up.
+//! Note: a pre-allocated buffer + `slice_set` (to avoid the per-token concat
+//! copy) was benchmarked and came out *slower* on candle+Metal at these
+//! shapes — `slice_set` is a costly scatter and the resulting non-contiguous
+//! view forces a full `.contiguous()` downstream anyway. Concat wins here.
+//!
+//! TODO: rotating attention-sink window (bounded memory). For now `max_size`
+//! / `keep` are accepted and retained but the cache grows unbounded.
 
 use candle_core::{Result, Tensor};
 
@@ -33,10 +37,13 @@ impl KvCache {
         }
     }
 
+    /// Number of tokens already cached (the RoPE / mask position offset).
+    /// Read *before* `update_and_fetch` folds in the current step.
     pub fn offset(&self) -> usize {
         self.offset
     }
 
+    /// Drop everything past `len` tokens (used by speculative decoding).
     #[allow(dead_code)]
     pub fn truncate(&mut self, len: usize) -> Result<()> {
         let len = len.min(self.offset);
@@ -48,6 +55,8 @@ impl KvCache {
         Ok(())
     }
 
+    /// Append `k`/`v` (shape `(batch, kv_heads, seq, head_dim)`) and return the
+    /// full cached keys/values to attend over.
     pub fn update_and_fetch(&mut self, k: &Tensor, v: &Tensor) -> Result<(Tensor, Tensor)> {
         let keys = match &self.keys {
             Some(prev) => Tensor::cat(&[prev, k], 2)?,
