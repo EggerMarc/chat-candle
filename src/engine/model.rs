@@ -15,7 +15,6 @@
 //! differs between the two; `forward` is identical.
 
 use std::io::{Read, Seek};
-#[cfg(not(target_arch = "wasm32"))]
 use std::path::Path;
 
 use candle_core::quantized::{QMatMul, QTensor, gguf_file};
@@ -451,8 +450,7 @@ impl Model {
         ))
     }
 
-    /// Native convenience: build from a GGUF file path.
-    #[cfg(not(target_arch = "wasm32"))]
+    /// Build from a GGUF file path.
     pub fn from_gguf(path: &Path, device: &Device) -> Result<(Self, ModelArgs, String)> {
         Self::from_gguf_reader(std::fs::File::open(path)?, device)
     }
